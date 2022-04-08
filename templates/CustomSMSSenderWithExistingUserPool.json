@@ -1,0 +1,984 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "AWS Cognito example template: CustomSMSSenderWithExistingUserPool. This example template creates and configures related resources for an existing user pool so that verification and MFA codes are delivered through alternative means instead of through SMS messaging. SMS messaging requires multiple setup steps that can hinder a customer's ability to try out and test Cognito user pools. With this example template, you can avoid the SMS setup and still complete workflows that would send a code to SMS by instead using the CustomSMSSender Lambda trigger to send codes to an SNS topic and deliver them to an email address. This template also defines a CloudFormation custom resource, which links to a helper Lambda function to add or remove 1) the necessary AWS Encryption SDK for the CustomSMSSender Lambda function 2) CustomSMSSender Lambda configurations for a user pool provided. This example template and approach is strictly for development and testing. For production use the standard setup for SMS is required.",
+  "Parameters": {
+    "CognitoCustomSMSSenderTestingSNSTopicSubscriber": {
+      "Type": "String",
+      "Description": "Provide a valid email address where all SMS messages will be sent instead of through SMS"
+    },
+    "CognitoUserPoolId": {
+      "Type": "String",
+      "Description": "Provide the Id of an existing Cognito user pool that you want to integrate Lambda-based SMS messaging with"
+    },
+    "CognitoSMSIAMRoleARN": {
+      "Type": "String",
+      "Description": "Provide the ARN of the SMS IAM role used by an existing Cognito user pool that you want to integrate Lambda-based SMS messaging with"
+    },
+    "OptInSNSTopicEncryptionInput": {
+      "Description": "Choose true if you want to encrypt the SNS topic with a newly created KMS key, or leave it as false to not use encryption",
+      "Default": false,
+      "Type": "String",
+      "AllowedValues": [
+        true,
+        false
+      ]
+    }
+  },
+  "Conditions": {
+    "OptInSNSTopicEncryption": {
+      "Fn::Equals": [
+        true,
+        {
+          "Ref": "OptInSNSTopicEncryptionInput"
+        }
+      ]
+    },
+    "OptOutSNSTopicEncryption": {
+      "Fn::Not": [
+        {
+          "Condition": "OptInSNSTopicEncryption"
+        }
+      ]
+    }
+  },
+  "Outputs": {
+    "CognitoCustomSMSSenderTestingLambdaRoleARN": {
+      "Description": "The ARN of the IAM role for the Cognito CustomSMSSender Lambda executions in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoCustomSMSSenderTestingLambdaRole",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaRoleARN-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperRoleARN": {
+      "Description": "The ARN of the IAM role for the Cognito CustomSMSSender helper Lambda executions in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoCustomSMSSenderTestingLambdaHelperRole",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaHelperRoleARN-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaName": {
+      "Description": "Cognito CustomSMSSender Lambda function name in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Ref": "CognitoCustomSMSSenderTestingLambda"
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaName-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaARN": {
+      "Description": "Cognito CustomSMSSender Lambda function ARN in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoCustomSMSSenderTestingLambda",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaARN-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperName": {
+      "Description": "Cognito CustomSMSSender helper Lambda function name in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Ref": "CognitoCustomSMSSenderTestingLambdaHelper"
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaHelperName-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperARN": {
+      "Description": "Cognito CustomSMSSender helper Lambda function ARN in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoCustomSMSSenderTestingLambdaHelper",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaHelperARN-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaSNSTopicARN": {
+      "Description": "Cognito CustomSMSSender SNS topic ARN in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Ref": "CognitoCustomSMSSenderTestingLambdaSNSTopic"
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaSNSTopicARN-${AWS::StackName}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingKMSKeyARN": {
+      "Description": "Cognito CustomSMSSender KMS key ARN in the Cognito Lambda-based SMS messaging testing stack",
+      "Value": {
+        "Fn::GetAtt": [
+          "CognitoCustomSMSSenderTestingKMSKey",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingKMSKeyARN-${AWS::StackName}"
+        }
+      }
+    }
+  },
+  "Resources": {
+    "CognitoCustomSMSSenderTestingLambdaInvocationPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "CognitoCustomSMSSenderTestingLambda",
+            "Arn"
+          ]
+        },
+        "Principal": "cognito-idp.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "The IAM role that is created for Lambda function executions in the Cognito user pool Lambda-based SMS messaging testing stack",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaPolicyOptInSNSEncryption": {
+      "Type": "AWS::IAM::Policy",
+      "Condition": "OptInSNSTopicEncryption",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "CognitoCustomSMSSenderTestingLambdaRole"
+          }
+        ],
+        "PolicyName": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaPolicyOptInSNSEncryption-${AWS::StackName}"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CognitoCustomSMSSenderTestingLambdaLogGroup",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": [
+                "sns:Publish"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Ref": "CognitoCustomSMSSenderTestingLambdaSNSTopic"
+                }
+              ]
+            },
+            {
+              "Action": [
+                "kms:Decrypt"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CognitoCustomSMSSenderTestingKMSKey",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:GenerateDataKey"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CognitoCustomSMSSenderTestingSNSTopicKMSKey",
+                    "Arn"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaPolicyOptOutSNSEncryption": {
+      "Type": "AWS::IAM::Policy",
+      "Condition": "OptOutSNSTopicEncryption",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "CognitoCustomSMSSenderTestingLambdaRole"
+          }
+        ],
+        "PolicyName": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaPolicyOptOutSNSEncryption-${AWS::StackName}"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CognitoCustomSMSSenderTestingLambdaLogGroup",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": [
+                "sns:Publish"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Ref": "CognitoCustomSMSSenderTestingLambdaSNSTopic"
+                }
+              ]
+            },
+            {
+              "Action": [
+                "kms:Decrypt"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CognitoCustomSMSSenderTestingKMSKey",
+                    "Arn"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambda": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "CognitoCustomSMSSenderTestingLambdaLogGroup",
+      "Properties": {
+        "Description": "A Lambda function that is created for the Cognito Lambda-based SMS messaging testing stack. This function is executed when the CustomSMSSender Lambda trigger gets triggered",
+        "FunctionName": {
+          "Fn::Sub": "CogSMSTesting-${AWS::StackName}"
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "CognitoCustomSMSSenderTestingLambdaRole",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.9",
+        "MemorySize": 512,
+        "Timeout": 120,
+        "Environment": {
+          "Variables": {
+            "KMS_KEY_ARN": {
+              "Fn::GetAtt": [
+                "CognitoCustomSMSSenderTestingKMSKey",
+                "Arn"
+              ]
+            },
+            "SNS_TOPIC_ARN": {
+              "Ref": "CognitoCustomSMSSenderTestingLambdaSNSTopic"
+            }
+          }
+        },
+        "Code": {
+          "ZipFile": {
+            "Fn::Join": ["\n",
+              [
+                "import aws_encryption_sdk",
+                "from aws_encryption_sdk import CommitmentPolicy",
+                "from aws_encryption_sdk.exceptions import DecryptKeyError",
+                "import base64",
+                "import boto3",
+                "import botocore",
+                "import json",
+                "import logging",
+                "import os",
+                "import sys",
+                "import traceback",
+                "",
+                "# Set up logger",
+                "logger = logging.getLogger()",
+                "logger.setLevel(logging.INFO)",
+                "",
+                "# Initiate environment variables",
+                "kms_key_arn = os.environ[\"KMS_KEY_ARN\"]",
+                "sns_topic_arn = os.environ[\"SNS_TOPIC_ARN\"]",
+                "",
+                "# Set up an encryption client with an explicit commitment policy: REQUIRE_ENCRYPT_ALLOW_DECRYPT",
+                "client = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=CommitmentPolicy.REQUIRE_ENCRYPT_ALLOW_DECRYPT)",
+                "",
+                "# Create an AWS KMS master key provider",
+                "kms_kwargs = dict(key_ids=[kms_key_arn])",
+                "master_key_provider = aws_encryption_sdk.StrictAwsKmsMasterKeyProvider(**kms_kwargs)",
+                "",
+                "# Decrypt the secret code using AWS Encryption SDK",
+                "def decrypt(ciphertext):",
+                "    try:",
+                "        decrypted_text, encryptor_header = client.decrypt(source=ciphertext,",
+                "                                                          key_provider=master_key_provider)",
+                "    except DecryptKeyError as err:",
+                "        err_info = \"Error decrypting with KMS key. Please check if the KMS key with ARN {} exists and the role that the CustomSMSSender Lambda function assumes has the kms:Decrypt permission on the key\".format(kms_key_arn)",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": str(exc_value),",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "    return decrypted_text.decode()",
+                "",
+                "# Lambda function handler",
+                "def handler(event, context):",
+                "    # Log triggerSource",
+                "    logger.info(\"triggerSource is \" + event[\"triggerSource\"])",
+                "",
+                "    # plain_text_code now has the decrypted secret",
+                "    plain_text_code = decrypt(base64.b64decode(event[\"request\"][\"code\"]))",
+                "    message = \"Code from the Cognito Lambda-based SMS messaging testing stack is: \" + plain_text_code",
+                "",
+                "    # Publish to a SNS topic to simulate custom SMS messaging",
+                "    sns_client = boto3.client(\"sns\")",
+                "    try:",
+                "        response = sns_client.publish(TopicArn = sns_topic_arn,",
+                "                                      Subject = \"Cognito Lambda-based SMS messaging testing stack\",",
+                "                                      Message = json.dumps({\"default\": message}),",
+                "                                      MessageStructure = \"json\")",
+                "        logger.info(\"Published the decrypted code to the SNS topic with ARN: {}\".format(sns_topic_arn))",
+                "    except botocore.exceptions.ClientError as err:",
+                "        err_info = \"Error publishing code to the SNS topic.\"",
+                "        if err.response[\"Error\"][\"Code\"] == \"AuthorizationError\":",
+                "            err_info = err_info + \" \" + \"Please check if the role that the CustomSMSSender Lambda function assumes has the sns:Publish permission to the SNS topic with ARN: {}\".format(sns_topic_arn)",
+                "        elif err.response[\"Error\"][\"Code\"] == \"InvalidParameter\":",
+                "            err_info = err_info + \" \" + \"Please check if request parameters comply with the associated constraints such as SNS topic ARN format and Subject length\"",
+                "        elif err.response[\"Error\"][\"Code\"] == \"NotFound\":",
+                "            err_info = err_info + \" \" + \"Please check if the desitination SNS topic with ARN: {} exists\".format(sns_topic_arn)",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                              \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                              \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "    return"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/CogSMSTesting-${AWS::StackName}"
+        },
+        "RetentionInDays": 30
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperResources": {
+      "Type": "Custom::CognitoCustomSMSSenderHelperResources",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CognitoCustomSMSSenderTestingLambdaHelper",
+            "Arn"
+          ]
+        },
+        "LayerName": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaLayer-${AWS::StackName}"
+        },
+        "Package": "aws-encryption-sdk",
+        "TargetLambda": {
+          "Ref": "CognitoCustomSMSSenderTestingLambda"
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "The IAM role that is created for helper Lambda function executions in the Cognito user pool Lambda-based SMS messaging testing stack",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "CognitoCustomSMSSenderTestingLambdaHelperLogGroup",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "Action": [
+                    "lambda:PublishLayerVersion",
+                    "lambda:DeleteLayerVersion",
+                    "lambda:GetLayerVersion"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:CognitoCustomSMSSenderTestingLambdaLayer-${AWS::StackName}*"
+                    }
+                  ]
+                },
+                {
+                  "Action": [
+                    "lambda:UpdateFunctionConfiguration"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:CogSMSTesting-${AWS::StackName}"
+                    }
+                  ]
+                },
+                {
+                  "Action": [
+                    "cognito-idp:DescribeUserPool",
+                    "cognito-idp:UpdateUserPool"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+                    }
+                  ]
+                },
+                {
+                  "Action": [
+                    "iam:PassRole"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Ref": "CognitoSMSIAMRoleARN"
+                    }
+                  ]
+                },
+                {
+                  "Action": [
+                    "kms:CreateGrant",
+                    "kms:RevokeGrant"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "CognitoCustomSMSSenderTestingKMSKey",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "PolicyName": {
+              "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaHelperPolicy-${AWS::StackName}"
+            }
+          }
+        ]
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelper": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "CognitoCustomSMSSenderTestingLambdaHelperLogGroup",
+      "Properties": {
+        "Description": "A Lambda function that adds or removes 1) the AWS Encryption SDK for the CustomSMSSender Lambda function 2) CustomSMSSender Lambda configurations for the user pool provided. It is executed whenever the custom resource is created, updated or deleted",
+        "FunctionName": {
+          "Fn::Sub": "CogTestingHelper-${AWS::StackName}"
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "CognitoCustomSMSSenderTestingLambdaHelperRole",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.9",
+        "MemorySize": 1024,
+        "Timeout": 300,
+        "Environment": {
+          "Variables": {
+            "KMS_KEY_ARN": {
+              "Fn::GetAtt": [
+                "CognitoCustomSMSSenderTestingKMSKey",
+                "Arn"
+              ]
+            },
+            "CUSTOM_SMS_SENDER_LAMBDA_ARN": {
+              "Fn::GetAtt": [
+                "CognitoCustomSMSSenderTestingLambda",
+                "Arn"
+              ]
+            },
+            "USER_POOL_ID": {
+              "Ref": "CognitoUserPoolId"
+            }
+          }
+        },
+        "Code": {
+          "ZipFile": {
+            "Fn::Join": ["\n",
+              [
+                "import boto3",
+                "import botocore",
+                "import cfnresponse",
+                "import json",
+                "import logging",
+                "import os",
+                "import pathlib",
+                "import re",
+                "import shutil",
+                "import subprocess",
+                "from subprocess import CalledProcessError",
+                "import sys",
+                "import tempfile",
+                "import traceback",
+                "",
+                "# Exception",
+                "class CognitoCustomSMSSenderTestingLambdaHelperException(Exception):",
+                "    pass",
+                "",
+                "# Set up logger",
+                "logger = logging.getLogger()",
+                "logger.setLevel(logging.INFO)",
+                "",
+                "# Initiate environment variables",
+                "kms_key_arn = os.environ[\"KMS_KEY_ARN\"]",
+                "custom_sms_sender_lambda_arn = os.environ[\"CUSTOM_SMS_SENDER_LAMBDA_ARN\"]",
+                "user_pool_id = os.environ[\"USER_POOL_ID\"]",
+                "",
+                "# Process arguments for the update_user_pool operation",
+                "def process_args_for_userpool(response, action):",
+                "    # A list of parameters that are present in the describe_user_pool operation response",
+                "    # These parameters cannot be updated by the update_user_pool operation and need to be dropped",
+                "    parameters_to_drop = [\"Id\", \"Name\", \"LastModifiedDate\", \"CreationDate\", \"SchemaAttributes\", \"UsernameAttributes\",",
+                "                          \"EstimatedNumberOfUsers\", \"Domain\", \"UsernameConfiguration\", \"Arn\"]",
+                "",
+                "    # Get user pool info",
+                "    user_pool = response[\"UserPool\"]",
+                "",
+                "    # Use <TemporaryPasswordValidityDays> instead of deprecated <UnusedAccountValidityDays>",
+                "    if \"TemporaryPasswordValidityDays\" in user_pool[\"Policies\"][\"PasswordPolicy\"].keys() and \"UnusedAccountValidityDays\" in user_pool[\"AdminCreateUserConfig\"].keys() and user_pool[\"Policies\"][\"PasswordPolicy\"][\"TemporaryPasswordValidityDays\"] == user_pool[\"AdminCreateUserConfig\"][\"UnusedAccountValidityDays\"]:",
+                "         user_pool[\"AdminCreateUserConfig\"].pop(\"UnusedAccountValidityDays\")",
+                "",
+                "    # Construct arguments for the update_user_pool operation",
+                "    args = {\"UserPoolId\" : user_pool[\"Id\"]}",
+                "",
+                "    # Add or remove CustomSMSSender Lambda configurations in arguments",
+                "    for key in user_pool.keys():",
+                "        if key not in parameters_to_drop:",
+                "            if key == \"LambdaConfig\" and action == \"add_custom_sms_sender\":",
+                "                if \"CustomSMSSender\" not in user_pool[\"LambdaConfig\"].keys():",
+                "                     user_pool[\"LambdaConfig\"][\"CustomSMSSender\"] = {}",
+                "                user_pool[\"LambdaConfig\"][\"CustomSMSSender\"][\"LambdaVersion\"] = \"V1_0\"",
+                "                user_pool[\"LambdaConfig\"][\"CustomSMSSender\"][\"LambdaArn\"] = custom_sms_sender_lambda_arn",
+                "                user_pool[\"LambdaConfig\"][\"KMSKeyID\"] = kms_key_arn",
+                "            elif key == \"LambdaConfig\" and action == \"remove_custom_sms_sender\":",
+                "                if \"CustomSMSSender\" in user_pool[\"LambdaConfig\"].keys():",
+                "                     user_pool[\"LambdaConfig\"].pop(\"CustomSMSSender\")",
+                "                if \"KMSKeyID\" in user_pool[\"LambdaConfig\"].keys():",
+                "                     user_pool[\"LambdaConfig\"].pop(\"KMSKeyID\")",
+                "            args[key] = user_pool[key]",
+                "    return args",
+                "",
+                "# Add or remove CustomSMSSender Lambda configurations for the existing user pool provided",
+                "def process_custom_sms_sender(action):",
+                "    cognito_client = boto3.client(\"cognito-idp\")",
+                "",
+                "    # Describe the current user pool",
+                "    try:",
+                "        response = cognito_client.describe_user_pool(UserPoolId=user_pool_id)",
+                "        logger.info(\"Describe the user pool with Id {}\".format(user_pool_id))",
+                "    except botocore.exceptions.ClientError as err:",
+                "        err_info = \"Error describing the user pool with Id {}.\".format(user_pool_id)",
+                "        if err.response[\"Error\"][\"Code\"] == \"ResourceNotFoundException\":",
+                "            err_info = err_info + \" \" +  \"Please check if the user pool with Id: {} exists\".format(user_pool_id)",
+                "        elif err.response[\"Error\"][\"Code\"] == \"AccessDeniedException\":",
+                "            err_info = err_info + \" \" + \"Please check if the role that the CustomSMSSender Lambda function assumes has the cognito-idp:DescribeUserPool permission on the user pool with Id: {}\".format(user_pool_id)",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                              \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                              \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "",
+                "    # Process arguments for the update_user_pool operation",
+                "    args = process_args_for_userpool(response, action)",
+                "",
+                "    # Update the existing user pool provided with processed arguments",
+                "    try:",
+                "        cognito_client.update_user_pool(**args)",
+                "        if action == \"add_custom_sms_sender\":",
+                "            logger.info(\"Added CustomSMSSender Lambda configurations to the user pool with Id {}\".format(args[\"UserPoolId\"]))",
+                "        elif action == \"remove_custom_sms_sender\":",
+                "            logger.info(\"Removed CustomSMSSender Lambda configurations from the user pool with Id {}\".format(args[\"UserPoolId\"]))",
+                "    except botocore.exceptions.ClientError as err:",
+                "        err_info = \"\"",
+                "        if action == \"add_custom_sms_sender\":",
+                "            err_info = \"Error adding CustomSMSSender Lambda configurations to the user pool with Id {}.\".format(args[\"UserPoolId\"])",
+                "        elif action == \"remove_custom_sms_sender\":",
+                "            err_info = \"Error removing CustomSMSSender Lambda configurations from the user pool with Id {}.\".format(args[\"UserPoolId\"])",
+                "",
+                "        if err.response[\"Error\"][\"Code\"] == \"ResourceNotFoundException\":",
+                "            err_info = err_info + \" \" +  \"Please check if the user pool with Id: {} exists\".format(args[\"UserPoolId\"])",
+                "        elif err.response[\"Error\"][\"Code\"] == \"AccessDeniedException\":",
+                "            err_info = err_info + \" \" + \"Please check if the role that the CustomSMSSender Lambda function assumes has the cognito-idp:UpdateUserPool permission on the user pool with Id: {}\".format(args[\"UserPoolId\"])",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                              \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                              \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "    return",
+                "",
+                "# Create a Lambda layer with AWS Encryption SDK",
+                "def create_layer_version(properties, lambda_client):",
+                "    # Get values from properties",
+                "    layer_name = properties[\"LayerName\"]",
+                "    aws_encryption_sdk = properties[\"Package\"]",
+                "    target_lambda = properties[\"TargetLambda\"]",
+                "",
+                "    # Create a temporary directory",
+                "    with tempfile.TemporaryDirectory() as temp_dir:",
+                "        lambda_temp_dir = pathlib.Path(temp_dir)",
+                "        temp_lib_python = lambda_temp_dir.joinpath(\"lib\", \"python\")",
+                "        temp_archive = lambda_temp_dir.joinpath(\"archive\")",
+                "",
+                "        # Execute pip command to get AWS Encryption SDK",
+                "        try:",
+                "            subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", aws_encryption_sdk, \"-t\", temp_lib_python])",
+                "        except CalledProcessError as err:",
+                "            err_info = \"Error running pip command to install AWS Encryption SDK.\"",
+                "            exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "            err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                                  \"errorMessage\": str(exc_value),",
+                "                                  \"errorInfo\" : err_info,",
+                "                                  \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "            logger.error(err_msg)",
+                "            raise err",
+                "",
+                "        # Create a Lambda layer with AWS Encryption SDK",
+                "        runtimes = [\"python%i.%i\" % sys.version_info[:2]]",
+                "        archived_file = pathlib.Path(shutil.make_archive(temp_archive, format=\"zip\", root_dir=temp_lib_python.parent))",
+                "        try:",
+                "            lambda_layer = lambda_client.publish_layer_version(LayerName=layer_name,",
+                "                                                           Description=aws_encryption_sdk,",
+                "                                                           Content={\"ZipFile\": archived_file.read_bytes()},",
+                "                                                           CompatibleRuntimes=runtimes)",
+                "            logger.info(\"Created Cognito CustomSMSSender Lambda layer {}\".format(lambda_layer[\"LayerVersionArn\"]))",
+                "        except botocore.exceptions.ClientError as err:",
+                "            err_info = \"Error publishing AWS Encryption SDK Lambda layer version.\"",
+                "            exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "            err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                                  \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                                  \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                                  \"errorInfo\" : err_info,",
+                "                                  \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                                  \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                                  \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "            logger.error(err_msg)",
+                "            raise err",
+                "",
+                "    # Attach the Lambda layer to the CustomSMSSender Lambda function",
+                "    version_arn = lambda_layer[\"LayerVersionArn\"]",
+                "    try:",
+                "        response = lambda_client.update_function_configuration(FunctionName=target_lambda,",
+                "                                                               Layers=[version_arn]),",
+                "        logger.info(\"Attached Lambda layer to {}\".format(target_lambda))",
+                "    except botocore.exceptions.ClientError as err:",
+                "        err_info = \"Error updating CustomSMSSender Lambda function with AWS Encryption SDK Lambda layer.\"",
+                "        if err.response[\"Error\"][\"Code\"] == \"ResourceNotFoundException\":",
+                "            err_info = err_info + \" \" + \"Please check if Lambda function with ARN: {} exists\".format(target_lambda)",
+                "        elif err.response[\"Error\"][\"Code\"] == \"ValidationException\":",
+                "            err_info = err_info + \" \" + \"Please check if the parameters in the request are invalid such as Lambda layer ARN format\"",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                              \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                              \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "    return version_arn",
+                "",
+                "# Delete the created Lambda layer",
+                "def delete_layer_version(version_arn, lambda_client):",
+                "    # Parse Lambda layer Version ARN",
+                "    match = re.fullmatch(r\"arn:(?P<aws_partition>.*):lambda:(?P<aws_region>.*):(?P<aws_account>\\d+):layer:(?P<layer_name>.*):(?P<version_number>\\d+)\", version_arn)",
+                "    if not match:",
+                "        raise CognitoCustomSMSSenderTestingLambdaHelperException(\"Lambda version ARN cannot be parsed while deleting\")",
+                "",
+                "    # Delete the Lambda layer",
+                "    layer_name = match.group(\"layer_name\")",
+                "    version_number = int(match.group(\"version_number\"))",
+                "    try:",
+                "        lambda_client.delete_layer_version(LayerName=layer_name,",
+                "                                           VersionNumber=version_number)",
+                "        logger.info(\"Deleted Lambda layer with version ARN {}\".format(version_arn))",
+                "    except botocore.exceptions.ClientError as err:",
+                "        err_info = \"Error deleting Lambda layer with version ARN {}.\".format(version_arn)",
+                "        exception_type, exception_value, exception_traceback = sys.exc_info()",
+                "        stack_track = traceback.format_exception(exception_type, exception_value, exception_traceback)",
+                "        exc_type, exc_value, exc_traceback = sys.exc_info()",
+                "        err_msg = json.dumps({\"errorType\": exc_type.__name__,",
+                "                              \"errorMessage\": err.response[\"Error\"][\"Message\"],",
+                "                              \"errorCode\": err.response[\"Error\"][\"Code\"],",
+                "                              \"errorInfo\" : err_info,",
+                "                              \"httpCode\" : err.response[\"ResponseMetadata\"][\"HTTPStatusCode\"],",
+                "                              \"requestId\" : err.response[\"ResponseMetadata\"][\"RequestId\"],",
+                "                              \"stackTrace\": traceback.format_exception(exc_type, exc_value, exc_traceback)})",
+                "        logger.error(err_msg)",
+                "        raise err",
+                "",
+                "# Lambda handler",
+                "def handler(event, context):",
+                "    request_type_upper = event[\"RequestType\"].upper()",
+                "    lambda_client = boto3.client(\"lambda\")",
+                "    response_data = {}",
+                "    logger.info(\"Request type is {}\".format(request_type_upper))",
+                "    try:",
+                "        if request_type_upper == \"CREATE\":",
+                "            version_arn = create_layer_version(event[\"ResourceProperties\"], lambda_client)",
+                "            process_custom_sms_sender(\"add_custom_sms_sender\")",
+                "            cfnresponse.send(event=event,",
+                "                             context=context,",
+                "                             responseData=response_data,",
+                "                             responseStatus=cfnresponse.SUCCESS,",
+                "                             physicalResourceId=version_arn)",
+                "        elif request_type_upper == \"UPDATE\":",
+                "            version_arn = event[\"PhysicalResourceId\"]",
+                "            cfnresponse.send(event=event,",
+                "                             context=context,",
+                "                             responseData=response_data,",
+                "                             responseStatus=cfnresponse.SUCCESS,",
+                "                             physicalResourceId=version_arn)",
+                "        elif request_type_upper == \"DELETE\":",
+                "            version_arn = event[\"PhysicalResourceId\"]",
+                "            delete_layer_version(version_arn, lambda_client)",
+                "            process_custom_sms_sender(\"remove_custom_sms_sender\")",
+                "            cfnresponse.send(event=event,",
+                "                             context=context,",
+                "                             responseData=response_data,",
+                "                             responseStatus=cfnresponse.SUCCESS,",
+                "                             physicalResourceId=version_arn)",
+                "    except Exception as e:",
+                "        logger.error(\"Internal Failure\")",
+                "        cfnresponse.send(event=event,",
+                "                         context=context,",
+                "                         responseData=response_data,",
+                "                         responseStatus=cfnresponse.FAILED,",
+                "                         reason=str(e))"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaHelperLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/CogTestingHelper-${AWS::StackName}"
+        },
+        "RetentionInDays": 30
+      }
+    },
+    "CognitoCustomSMSSenderTestingLambdaSNSTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": {
+          "Fn::Sub": "CognitoCustomSMSSenderTestingLambdaSNSTopic-${AWS::StackName}"
+        },
+        "Subscription": [
+          {
+            "Endpoint": {
+              "Fn::Sub": "${CognitoCustomSMSSenderTestingSNSTopicSubscriber}"
+            },
+            "Protocol": "email"
+          }
+        ],
+        "KmsMasterKeyId": {
+          "Fn::If": [
+            "OptInSNSTopicEncryption",
+            {
+              "Fn::GetAtt": [
+                "CognitoCustomSMSSenderTestingSNSTopicKMSKey",
+                "Arn"
+              ]
+            },
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingKMSKey": {
+      "Type": "AWS::KMS::Key",
+      "Properties": {
+        "Description": "The KMS key that is used by the Cognito user pool to encrypt the code and by the CustomSMSSender Lambda function to decrypt the code in the Cognito user pool Lambda-based SMS testing stack.",
+        "EnableKeyRotation": true,
+        "PendingWindowInDays": 20,
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Id": "CognitoCustomSMSSenderTestingKMSKeyPolicy",
+          "Statement": [
+            {
+              "Sid": "Enable IAM User Permissions",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": [
+                  {
+                    "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root"
+                  }
+                ]
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+    "CognitoCustomSMSSenderTestingSNSTopicKMSKey": {
+      "Type": "AWS::KMS::Key",
+      "Condition": "OptInSNSTopicEncryption",
+      "Properties": {
+        "Description": "The KMS key that is used for the testing SNS topic encryption in the Cognito user pool Lambda-based SMS testing stack.",
+        "EnableKeyRotation": true,
+        "PendingWindowInDays": 20,
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Id": "CognitoCustomSMSSenderTestingSNSTopicKMSKeyPolicy",
+          "Statement": [
+            {
+              "Sid": "Enable IAM User Permissions",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": [
+                  {
+                    "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root"
+                  }
+                ]
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
